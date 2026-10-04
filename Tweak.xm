@@ -519,6 +519,7 @@ static void killedPush(void *p) {
  * ⇒ 表现就是"全球行动玩几把就闪退"，而僵尸那份因为句柄一直能用所以不闪退。
  * 这里在「控制器实例换指针」或「_running 0→1」时统一作废，下一局重新抓。 */
 static int  matchId = 0;
+static int  settleGen = 0;    /* ★ v0.4.2：关卡代次，换局 +1 ⇒ 上一局的延迟结算回调自动作废 */
 static void *lastMatchInst = NULL;
 static int  lastMatchRun = 0;
 static void *capInstWrote = NULL;      /* 准备阶段已写过封顶的控制器实例（每实例只写一次） */
@@ -773,7 +774,6 @@ static void targetTick(void) {
 static void (*orig_ShowKillCam)(void *self) = NULL;
 static void *settleLc = NULL;           /* 防同关重复结算（双保险） */
 static long  settleAt = 0;
-static int   settleGen = 0;             /* ★ v0.4.2：关卡代次，换局 +1 ⇒ 旧延迟回调自动作废 */
 static void my_ShowKillCam(void *self) {
     @try {
         /* ★ v0.4.0 模式门禁：只在全球行动关卡接管结算；别的模式（含 PVP）一律放行原版 KillCam，
