@@ -82,7 +82,7 @@
 #include <stdlib.h>      /* malloc / calloc */
 #include <sys/stat.h>    /* 配置热重载：stat() 取文件修改时间 */
 
-#define TWEAK_VERSION "0.4.0"
+#define TWEAK_VERSION "0.4.1"
 #define BUNDLE_SNIPER3D "com.fungames.sniper3d"
 
 /* ★ 默认参数（会被配置覆盖）—— 必须定义在文件头，ConfigDefaults() 要用 */
@@ -99,6 +99,11 @@
 #define DEF_SPAWN_LIMIT    5        /* 同屏上限 */
 #define DEF_SPAWN_TOTAL    0        /* 0 = 不限（内部用 500） */
 #define DEF_TARGET_POINTS  500      /* 分数封顶 = 500 */
+/* ★ v0.4.1：目标数门槛。旧代码写死 targetsN<=3 就不杀（本意防大厅乱杀），
+ *   但防大厅其实由 _running=1 那道闸全权负责 ⇒ 门槛是多余的，副作用是"残局剩 1~3 只
+ *   时自动杀怪停手，必须玩家手动补枪"（真机日志：一天 273 次"目标数≤3"诊断，
+ *   残局常卡 20~30 秒，表现为"不能连续打下去"）。默认 1 = 有目标就杀，残局自动收尾。 */
+#define DEF_MIN_TARGETS    1
 /* ★ v0.2.0：DEF_GUARD_MARGIN / DEF_GUARD_FIRE_MS 已随"最后一发保护"整段删除 */
 
 /* 全球行动控制器 TournamentInGameController */
@@ -194,6 +199,7 @@ typedef struct {
     BOOL   equipHook;      /* ★ v0.3.1：是否安装 ReportLevelResult 钩子（默认关；v0.3.0 该 MSHook 涉嫌结算闪退） */
     BOOL   noKillCam;      /* ★ v0.3.1：安全结算（拦截 ShowKillCam，复刻 FakeKillCam 延迟结算） */
     BOOL   spawnMulti;     /* ★ v0.3.2：是否改写全部运行中的刷怪器（默认关=只写第一个；全部都写=40只/秒 会引擎 SIGABRT） */
+    int    minTargets;     /* ★ v0.4.1：场上至少几个目标才开杀（默认 1 = 残局自动收尾；改 4 = 旧的"≤3 不杀"行为） */
 } GAConfig;
 static GAConfig cfg;
 
@@ -210,6 +216,7 @@ static void ConfigDefaults(GAConfig *c) {
     c->noKillCam    = YES;    /* ★ v0.3.1：默认安全结算 */
     c->equipHook    = NO;     /* ★ v0.3.1：装备钩子默认关 */
     c->spawnMulti   = NO;     /* ★ v0.3.2：默认只改第一个刷怪器（防 40只/秒 引擎 abort） */
+    c->minTargets   = DEF_MIN_TARGETS;   /* ★ v0.4.1 */
 }
 static int cfgInt(NSDictionary *d, NSString *k, int def) {
     id v = d[k];
@@ -243,6 +250,8 @@ static void ConfigFromDict(GAConfig *c, NSDictionary *d) {
     c->noKillCam    = cfgBool(d, @"no_killcam", YES); /* ★ v0.3.1：安全结算 */
     c->equipHook    = cfgBool(d, @"equip_hook", NO);  /* ★ v0.3.1：装备钩子默认关，改后需重启 */
     c->spawnMulti   = cfgBool(d, @"spawn_multi", NO); /* ★ v0.3.2：默认只改第一个刷怪器 */
+    c->minTargets   = cfgInt(d, @"min_targets", DEF_MIN_TARGETS);   /* ★ v0.4.1 */
+    if (c->minTargets < 1) c->minTargets = 1;
     if (c->tickMs < 30) c->tickMs = 30;          /* 太快会压死主线程 */
     if (c->killPerTick < 1) c->killPerTick = 1;
     if (c->spawnLimit < 1) c->spawnLimit = 1;
@@ -263,6 +272,7 @@ static void WriteDefaultConfig(void) {
         @"  \"equip_bonus\": 1.0,\n"
         @"  \"equip_hook\": false,\n"
         @"  \"spawn_multi\": false,\n"
+        @"  \"min_targets\": 1,\n"
         @"  \"no_killcam\": true\n"
         @"}\n";
     [body writeToFile:ConfigPath() atomically:YES encoding:NSUTF8StringEncoding error:nil];
@@ -602,7 +612,12 @@ static void killTick(void) {
     @try {
         collectTargets();
         if (targetsN == 0) { killedN = 0; return; }     /* 换局/场上清空 → 清掉旧标记 */
-        if (targetsN <= 3) { killDiag(@"目标数≤3(疑似大厅/菜单 或 敌人不是Person类型)", 1, 1, targetsN); return; }  /* 大厅/菜单不许开杀 */
+        /* ★ v0.4.1：门槛改成可配置（默认 1）。防大厅靠上面 _running=1 那道闸，
+         *   这里再卡"≤3 不杀"只会让残局停手、必须手动补枪。设 min_targets=4 可恢复旧行为。 */
+        if (targetsN < cfg.minTargets) {
+            killDiag([NSString stringWithFormat:@"目标数不足门槛(%d<%d) → 本拍不杀", targetsN, cfg.minTargets], 1, 1, targetsN);
+            return;
+        }
         int n = 0;
         for (int i = 0; i < targetsN && n < cfg.killPerTick; i++) {
             void *p = targets[i];
