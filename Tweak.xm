@@ -524,6 +524,7 @@ static int  lastMatchRun = 0;
 static void *capInstWrote = NULL;      /* 准备阶段已写过封顶的控制器实例（每实例只写一次） */
 static void onNewMatch(const char *why) {
     matchId++;
+    settleGen++;                       /* ★ v0.4.2：旧延迟结算回调自动作废 */
     killedN = 0;                       /* 击杀去重表（对象池会复用旧地址） */
     shooterInst = NULL; shooterFindAt = 0;
     ctrlDrop();
@@ -772,6 +773,7 @@ static void targetTick(void) {
 static void (*orig_ShowKillCam)(void *self) = NULL;
 static void *settleLc = NULL;           /* 防同关重复结算（双保险） */
 static long  settleAt = 0;
+static int   settleGen = 0;             /* ★ v0.4.2：关卡代次，换局 +1 ⇒ 旧延迟回调自动作废 */
 static void my_ShowKillCam(void *self) {
     @try {
         /* ★ v0.4.0 模式门禁：只在全球行动关卡接管结算；别的模式（含 PVP）一律放行原版 KillCam，
@@ -795,9 +797,13 @@ static void my_ShowKillCam(void *self) {
         if (kd > 5.0f) kd = 5.0f;
         TLog(@"[PVE] 结算: 已拦截空命中慢动作 → %.1f 秒后安全结算（复刻 FakeKillCam，无 KillCam）", (double)kd);
         void *lc = self;
+        int myGen = settleGen;                    /* ★ v0.4.2：拍下当前"关卡代次" */
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kd * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
                            @try {
+                               /* ★ 关卡换了代（换局/离场）⇒ 上一个回调作废，绝不能在新一局里触发 */
+                               if (myGen != settleGen) { TLog(@"[PVE] 结算回调已作废（关卡代次已变）"); return; }
+                               if (!ctrlInst()) { TLog(@"[PVE] 结算回调跳过（已离开全球行动）"); return; }
                                if (mOnKCF) inv(mOnKCF, lc, NULL, 0);
                            } @catch (NSException *e) {}
                        });
