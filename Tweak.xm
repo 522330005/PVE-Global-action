@@ -175,6 +175,8 @@ static void TLog(NSString *fmt, ...) {
         NSString *line = [NSString stringWithFormat:@"[%@] %@\n", [df stringFromDate:[NSDate date]], msg];
         NSFileManager *fm = [NSFileManager defaultManager];
         NSString *p = LogPath();
+        static BOOL logTrunc = NO;   /* ★ 每次游戏启动只截断一次：日志不跨局堆积（10:14 用户要求） */
+        if (!logTrunc) { logTrunc = YES; [fm createFileAtPath:p contents:nil attributes:nil]; }   /* createFileAtPath 对已存在文件 = 截断清零 */
         if (![fm fileExistsAtPath:p]) [fm createFileAtPath:p contents:nil attributes:nil];
         NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:p];
         if (fh) { [fh seekToEndOfFile]; [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]]; [fh closeFile]; }
