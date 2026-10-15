@@ -1,8 +1,8 @@
-Package: com.sniper.pvega
-Name: Sniper PVE 全球行动
-Version: 0.4.1
+Package: com.sniper.camp
+Name: Sniper 主线+特别行动
+Version: 0.4.2
 Architecture: iphoneos-arm64
-Description: 全球行动专属(模式门禁:只在全球行动关卡启用)/自动杀怪/封顶500/刷怪5/无限子弹/安全结算
+Description: 主线/特别行动·进任务两闸+去风向/下坠+无限子弹+射击无冷却（5钩）★v0.4.0: 模式门控（PVP/活动不放行）+ 体力补满不误伤 + master=0=完全不挂钩(热开)★v0.4.1: 日志启动即清+CharacterShooter偏移经7.11.2 dump.cs逐字段验证(0xC8/0x94/0x11C/0x68一致)★v0.4.2: JSON错误可见+orig_shoot空指针守卫
 Maintainer: sniper
 Author: sniper
 Section: Tweaks
