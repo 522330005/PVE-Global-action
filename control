@@ -1,8 +1,8 @@
 Package: com.sniper.pvega
 Name: Sniper PVE 全球行动
-Version: 0.4.3
+Version: 0.4.5
 Architecture: iphoneos-arm64
-Description: 全球行动专属(模式门禁:只在全球行动关卡启用)/自动杀怪/封顶500/刷怪5/无限子弹/安全结算/日志启动即清(v0.4.3 启动重试上限+JSON错误可见+il2cpp异常可见)
+Description: 全球行动专属(模式门禁:只在全球行动关卡启用)/自动杀怪/封顶500/刷怪5/无限子弹/安全结算/日志启动即清(v0.4.4 启动重试上限+JSON错误可见+il2cpp异常可见+热卸载timer清理)
 Maintainer: sniper
 Author: sniper
 Section: Tweaks

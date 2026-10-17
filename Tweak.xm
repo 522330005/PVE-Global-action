@@ -82,7 +82,7 @@
 #include <stdlib.h>      /* malloc / calloc */
 #include <sys/stat.h>    /* 配置热重载：stat() 取文件修改时间 */
 
-#define TWEAK_VERSION "0.4.3"
+#define TWEAK_VERSION "0.4.5"  /* 2026-10-17：★my_ShowKillCam 补 cfg.master 闸——master=0 时这个独立结算钩也放行原版（之前只查 noKillCam，与主线同一个"master 管不住"坑）*/
 #define BUNDLE_SNIPER3D "com.fungames.sniper3d"
 
 /* ★ 默认参数（会被配置覆盖）—— 必须定义在文件头，ConfigDefaults() 要用 */
@@ -793,8 +793,10 @@ static void my_ShowKillCam(void *self) {
     @try {
         /* ★ v0.4.0 模式门禁：只在全球行动关卡接管结算；别的模式（含 PVP）一律放行原版 KillCam，
          *   否则会劫持 PVP/其它模式的击杀镜头与结算链。 */
-        if (!cfg.noKillCam || !gReady || !mOnKCF || !ctrlInst()) {
-            if (orig_ShowKillCam) orig_ShowKillCam(self);   /* 开关关闭 / 不在全球行动 → 原生行为 */
+        /* ★ v0.4.3 master 总开关补漏：master=0 时这个独立钩(不在 frame 里)也必须放行原版，
+         *   否则 master=false 关了 frame 的功能，这个"安全结算/拦截 KillCam"却照常劫持。 */
+        if (!cfg.master || !cfg.noKillCam || !gReady || !mOnKCF || !ctrlInst()) {
+            if (orig_ShowKillCam) orig_ShowKillCam(self);   /* master关/开关关闭/不在全球行动 → 原生行为 */
             return;
         }
         long now = (long)(CFAbsoluteTimeGetCurrent() * 1000);
@@ -1071,4 +1073,16 @@ static void setupStep(void) {
             } @catch (NSException *e) {}
         }
     });
+}
+
+/* ================= 卸载析构（豆包审计对齐加固 v 本轮） =================
+ * 仅防护热卸载（iCleaner 等进程不杀强行卸 dylib）场景下的 NSTimer 悬空野指针。
+ * 不做 MSHookRemoveHook / 不恢复字节补丁：热卸载时本 dylib 代码段已卸，
+ * 调 MSHook 相关函数反而直接崩；进程正常退出由 OS 回收，也无需处理。 */
+__attribute__((destructor))
+static void tweakDtor(void) {
+    if (gTimer) {
+        [gTimer invalidate];
+        gTimer = nil;
+    }
 }
