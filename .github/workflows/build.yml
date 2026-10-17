@@ -2,7 +2,7 @@
 # GitHub Actions 编译 rootless deb  —  已验证 v5（TNGJB 成功）
 # 用法：放在 tweak 仓库的 .github/workflows/build.yml
 # 触发：push 到 main/master，或 Actions 页手动 Run workflow
-# 产物：Artifacts 里的 packages/*.deb（下载装手机）
+# 产物：① Artifacts 的 Sniper*-deb.zip（解压得 deb）② Releases 滚动发布「rolling」→ 点开直接下 .deb（永久直链见 workflow 日志）
 # =============================================================
 
 name: Build Rootless Deb
@@ -15,11 +15,49 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # 滚动 Release 需要写权限
     steps:
       - name: Checkout (recursive, 拉齐 theos 子模块)
         uses: actions/checkout@v4
         with:
           submodules: recursive   # ⚠️ theos 的 dm.pl 是 vendor 子模块，不 recursive 会 "requires dm.pl"
+
+      # ★ 2026-10-02 加：身份自检。期望值写死在本仓库的 workflow 里，
+      #   手动往 GitHub 传文件时若把两个仓库的 control / Makefile 传反，
+      #   这里会立刻红字失败（而不是默默编出一个对调的 deb）。
+      - name: Verify identity (防 Makefile/control 传错仓库)
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          set -e
+          # ★ 先按【仓库名】推断本仓库应有的身份 —— 整套文件传错仓库时也能报准；
+          #   仓库名认不出来就用本 workflow 写死的期望值兜底。
+          EXPECT_TWEAK=SniperPVEGA
+          EXPECT_PKG=com.sniper.pvega
+          case "$REPO" in
+            *ombie*|*ZB*|*zb*)     EXPECT_TWEAK=SniperPVEZB; EXPECT_PKG=com.sniper.pvezb ;;
+            *lobal*|*Ops*|*PVEGA*) EXPECT_TWEAK=SniperPVEGA; EXPECT_PKG=com.sniper.pvega ;;
+            *PVP*|*pvp*)           EXPECT_TWEAK=SniperPVP;   EXPECT_PKG=com.sniper.pvp ;;
+          esac
+          echo "仓库 = $REPO"
+          echo "本仓库应有身份: TWEAK_NAME=$EXPECT_TWEAK   Package=$EXPECT_PKG"
+          TWEAK=$(grep -m1 '^TWEAK_NAME' Makefile | awk '{print $3}')
+          PKG=$(grep -m1 '^Package:' control | awk '{print $2}')
+          echo "期望  TWEAK_NAME=$EXPECT_TWEAK   Package=$EXPECT_PKG"
+          echo "实际  TWEAK_NAME=$TWEAK   Package=$PKG"
+          if [ "$TWEAK" != "$EXPECT_TWEAK" ]; then
+            echo "❌ Makefile 不对：本仓库应是 $EXPECT_TWEAK，实际是 $TWEAK"
+            exit 1
+          fi
+          if [ "$PKG" != "$EXPECT_PKG" ]; then
+            echo "❌ control 不对：应是 $EXPECT_PKG，实际是 $PKG"
+            echo "   ← 极可能是把两个仓库的 control 传反了！"
+            exit 1
+          fi
+          if [ ! -f "$TWEAK.plist" ]; then echo "❌ 缺少 $TWEAK.plist"; exit 1; fi
+          if [ ! -f Tweak.xm ]; then echo "❌ 缺少 Tweak.xm"; exit 1; fi
+          echo "✅ 身份自洽：Makefile / control / plist 三者匹配"
 
       - name: Install deps
         run: |
@@ -61,6 +99,28 @@ jobs:
           export THEOS_PACKAGE_SCHEME=rootless
           make package
 
+      # ★ 2026-10-02 加：产物自检。校验 deb 的 Package 与内部 dylib 名是否匹配，
+      #   这是最后一道关 —— 就算前面全对，这里也能抓出"包里装的不是自己那套代码"。
+      - name: Verify deb (防产物 dylib 与 Package 对调)
+        run: |
+          set -e
+          EXPECT_PKG=com.sniper.pvega
+          EXPECT_DYLIB=SniperPVEGA.dylib
+          DEB=$(ls packages/*.deb | head -1)
+          PKG=$(dpkg-deb -f "$DEB" Package)
+          DYLIB=$(dpkg-deb -c "$DEB" | grep -o '[^/]*\.dylib' | head -1)
+          echo "产物 $DEB"
+          echo "  Package=$PKG    dylib=$DYLIB"
+          if [ "$PKG" != "$EXPECT_PKG" ]; then
+            echo "❌ deb 的 Package 应为 $EXPECT_PKG，实际 $PKG"
+            exit 1
+          fi
+          if [ "$DYLIB" != "$EXPECT_DYLIB" ]; then
+            echo "❌ deb 内的 dylib 应为 $EXPECT_DYLIB，实际 $DYLIB"
+            exit 1
+          fi
+          echo "✅ 产物自洽：Package=$PKG 与 dylib=$DYLIB 匹配"
+
       - name: Upload deb artifact
         uses: actions/upload-artifact@v4
         with:
@@ -68,3 +128,34 @@ jobs:
           path: |
             **/packages/*.deb
           if-no-files-found: error
+
+      - name: Publish rolling Release (点开直接下 .deb，不解压)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          DEB=$(ls packages/*.deb | head -1)
+          BASE=$(basename "$DEB")
+          TWEAK=$(grep -m1 '^TWEAK_NAME' Makefile | awk '{print $3}')
+          LATEST_NAME="${TWEAK}-latest.deb"
+          LATEST="${LATEST_NAME}"   # 放工作区根，别放 packages/，否则下一轮 ls 会把它抓成 DEB
+          TAG=rolling
+          # 复制一份固定名副本，使下载链接永久不变、永远指向最新构建
+          cp -f "$DEB" "$LATEST"
+          NOTES="滚动发布 · 每次 push 自动覆盖更新，Release 里只保留最新一次构建。附件 ${BASE}（版本化）与 ${LATEST_NAME}（固定名，下载链接永久不变）。构建于 $(date -u '+%Y-%m-%d %H:%M UTC')"
+          echo "发布 ${BASE} + ${LATEST_NAME} -> Release ${TAG}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # 清掉旧资产，避免历史 deb 越堆越多
+            gh release view "$TAG" --json assets --jq '.assets[].name' > /tmp/old_assets.txt || true
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              echo "  删除旧资产 $f"
+              gh release delete-asset "$TAG" "$f" -y >/dev/null 2>&1 || true
+            done < /tmp/old_assets.txt
+            gh release upload "$TAG" "$DEB" "$LATEST" --clobber
+            gh release edit "$TAG" --title "最新构建 · 滚动发布" --notes "$NOTES"
+          else
+            gh release create "$TAG" "$DEB" "$LATEST" --title "最新构建 · 滚动发布" --notes "$NOTES"
+          fi
+          echo "✅ 永久直链（永远指向最新一次构建）:"
+          echo "   https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/${LATEST_NAME}"
